@@ -1,0 +1,5 @@
+{
+  "name": "Chatbot de Política de Seguridad",
+  "description": "Un chatbot de IA que responde preguntas sobre la Política de Seguridad de TI de Tecnoglass, utilizando el sitio web oficial como fuente de información.",
+  "requestFramePermissions": []
+}
