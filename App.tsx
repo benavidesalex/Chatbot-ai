@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { ChatMessage, GroundingChunk } from './types';
-import { streamChatResponse } from './services/geminiService';
+//import { streamChatResponse } from './services/geminiService';
 import Header from './components/Header';
 import ChatWindow from './components/ChatWindow';
 import ChatInput from './components/ChatInput';
@@ -9,6 +9,9 @@ const INITIAL_MESSAGE: ChatMessage = {
   role: 'model',
   content: "¡Hola! Soy un asistente de IA especializado. Solo puedo responder preguntas sobre la Política de Seguridad de TI de Tecnoglass, basándome en la información de https://ciberseguridad.tecnoglass.com.",
 };
+
+// Línea a agregar después de las otras importaciones
+const WORKER_URL = "https://chatbot-api-worker.tecnoesw3.workers.dev"; // <<<<< ¡PON TU URL AQUÍ!
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE]);
@@ -31,51 +34,72 @@ const App: React.FC = () => {
       { role: 'model', content: '' },
     ]);
 
-    try {
-      const stream = streamChatResponse(newMessages);
-      const allGroundingChunks = new Map<string, GroundingChunk['web']>();
+    
+  // INICIO DEL REEMPLAZO (Aproximadamente Línea 36)
+try {
+    // La petición solo envía el último mensaje del usuario, no el historial completo,
+    // ya que nuestro Worker simplificado solo espera el 'prompt'.
+    const userPrompt = userInput.trim();
 
-      for await (const part of stream) {
-        if (part.groundingChunks) {
-          part.groundingChunks.forEach(chunk => {
-            if (chunk.web?.uri) {
-              allGroundingChunks.set(chunk.web.uri, chunk.web);
-            }
-          });
-        }
+    const response = await fetch(WORKER_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        // Enviamos el mensaje del usuario con la clave 'prompt', que es lo que el Worker espera
+        body: JSON.stringify({ prompt: userPrompt }), 
+    });
 
-        setMessages((prevMessages) => {
-          const lastMessage = prevMessages[prevMessages.length - 1];
-          if (lastMessage.role === 'model') {
-            const updatedMessages = [...prevMessages];
-            updatedMessages[prevMessages.length - 1] = {
-              ...lastMessage,
-              content: lastMessage.content + (part.text || ''),
-              groundingChunks: Array.from(allGroundingChunks.values()).map(web => ({ web })),
-            };
-            return updatedMessages;
-          }
-          return prevMessages;
-        });
-      }
-    } catch (err) {
-      const errorMessage = 'Lo siento, encontré un error. Por favor, inténtalo de nuevo.';
-      setError(errorMessage);
-       setMessages((prevMessages) => {
-          const lastMessage = prevMessages[prevMessages.length - 1];
-          if (lastMessage.role === 'model' && lastMessage.content === '') {
-            const updatedMessages = [...prevMessages];
-            updatedMessages[prevMessages.length - 1] = {
-              ...lastMessage,
-              content: errorMessage,
-            };
-            return updatedMessages;
-          }
-          return [...prevMessages, {role: 'model', content: errorMessage}];
-       });
-    } finally {
-      setIsLoading(false);
+    const data = await response.json();
+
+    if (!response.ok) {
+        // Manejo de errores si el Worker devuelve un estado no exitoso (ej. 400, 500)
+        throw new Error(data.error || "El servidor del chatbot devolvió un error. Código: " + response.status);
     }
+    
+    const botResponseText = data.response || "No se recibió respuesta del modelo.";
+
+    // Actualiza la última respuesta del modelo de forma atómica (no streaming)
+    setMessages((prevMessages) => {
+        const lastMessage = prevMessages[prevMessages.length - 1];
+        if (lastMessage.role === 'model') {
+            const updatedMessages = [...prevMessages];
+            updatedMessages[prevMessages.length - 1] = {
+                ...lastMessage,
+                content: botResponseText,
+                // Si ya no manejamos "groundingChunks" en el Worker, esta propiedad puede necesitar limpieza o eliminación.
+                // Por ahora, la dejamos como null si no la devuelve el Worker.
+                groundingChunks: lastMessage.groundingChunks || [], 
+            };
+            return updatedMessages;
+        }
+        // Si por alguna razón la última no es del modelo (no debería pasar), agregamos la nueva.
+        return [...prevMessages, { role: 'model', content: botResponseText }]; 
+    });
+
+} catch (err) {
+    const errorMessage = 'Lo siento, encontré un error. Por favor, inténtalo de nuevo.';
+    setError(errorMessage);
+    setMessages((prevMessages) => {
+        // Lógica de manejo de errores mejorada
+        const lastMessage = prevMessages[prevMessages.length - 1];
+        if (lastMessage.role === 'model' && lastMessage.content === '') {
+            const updatedMessages = [...prevMessages];
+            updatedMessages[prevMessages.length - 1] = {
+                ...lastMessage,
+                content: errorMessage,
+            };
+            return updatedMessages;
+        }
+        return [...prevMessages, {role: 'model', content: errorMessage}];
+    });
+} finally {
+    setIsLoading(false);
+}
+// FIN DEL REEMPLAZO  
+    
+    
+    
   };
 
   const handleClearChat = () => {
